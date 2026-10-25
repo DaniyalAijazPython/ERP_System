@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.deps import get_current_user, require_roles
 from app.modules.auth import services
+from app.modules.inventory.services import seed_tenant_defaults
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
     CreateUserIn,
@@ -20,7 +21,8 @@ router = APIRouter(tags=["auth"])
 
 @router.post("/auth/register-company", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 def register_company(body: RegisterCompanyIn, db: Session = Depends(get_db)) -> TokenOut:
-    _, user = services.register_company(db, body)
+    tenant, user = services.register_company(db, body)
+    seed_tenant_defaults(db, tenant.id)
     return services.login(db, user.email, body.password)
 
 

@@ -51,7 +51,7 @@ def test_me_requires_auth(client):
 
 def test_owner_creates_user_and_role_limits(client, owner_headers):
     r = client.post(
-        "/api/v1/users",
+        "/api/v1/create_users",
         headers=owner_headers,
         json={"full_name": "Bilal Store", "email": "bilal@example.com", "password": "store-pass-1", "role": "store"},
     )
@@ -69,7 +69,7 @@ def test_owner_creates_user_and_role_limits(client, owner_headers):
 
 def test_cannot_create_second_owner(client, owner_headers):
     r = client.post(
-        "/api/v1/users",
+        "/api/v1/create_users",
         headers=owner_headers,
         json={"full_name": "Eve", "email": "eve@example.com", "password": "password-123", "role": "owner"},
     )
