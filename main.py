@@ -1,9 +1,9 @@
 from fastapi import APIRouter, FastAPI
 
 from app.core.errors import register_error_handlers
-from app.modules.auth.routes import router as auth_router
-from app.modules.inventory.routes import router as inventory_router
-from app.modules.stock.routes import router as stock_router
+from app.departments.auth.routes import router as auth_router
+from app.departments.inventory.routes import router as inventory_router
+from app.departments.stock.routes import router as stock_router
 
 
 def create_app() -> FastAPI:

@@ -12,8 +12,8 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.modules.auth.models import Role, Tenant, User
-from app.modules.auth.schemas import CreateUserIn, RegisterCompanyIn, TokenOut
+from app.departments.auth.models import Role, Tenant, User
+from app.departments.auth.schemas import CreateUserIn, RegisterCompanyIn, TokenOut
 
 
 def _normalize(email: str) -> str:

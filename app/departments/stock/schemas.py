@@ -100,3 +100,64 @@ class StockFixIn(BaseModel):
     warehouse_id: uuid.UUID | None = None
     counted_quantity: Decimal = Field(ge=0, max_digits=18, decimal_places=3, description="What you really have now")
     reason: str = Field(min_length=3, max_length=300, description="Why the count was wrong")
+
+
+# ------------------------------------------------------------ Stock Out
+class OutReason(str, Enum):
+    production = "production"
+    damaged = "damaged"
+    sample = "sample"
+    other = "other"
+
+
+class QtyLineIn(BaseModel):
+    item_id: uuid.UUID
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
+
+
+class StockOutIn(BaseModel):
+    warehouse_id: uuid.UUID | None = Field(default=None, description="Leave empty for your main warehouse")
+    reason: OutReason
+    note: str | None = Field(default=None, max_length=500, description="Needed when reason is 'other'")
+    lines: list[QtyLineIn] = Field(min_length=1, max_length=200)
+
+
+class CostLineOut(_Out):
+    item_id: uuid.UUID
+    item_name: str
+    unit_code: str
+    quantity: Decimal
+    unit_cost: Decimal
+
+
+class StockOutOut(_Out):
+    id: uuid.UUID
+    number: str
+    status: str
+    warehouse_id: uuid.UUID
+    warehouse_name: str
+    reason: str
+    note: str | None
+    total_cost: Decimal
+    created_at: datetime
+    lines: list[CostLineOut]
+
+
+# ------------------------------------------------------------ Move stock
+class StockMoveIn(BaseModel):
+    from_warehouse_id: uuid.UUID
+    to_warehouse_id: uuid.UUID
+    note: str | None = Field(default=None, max_length=500)
+    lines: list[QtyLineIn] = Field(min_length=1, max_length=200)
+
+
+class StockMoveOut(_Out):
+    id: uuid.UUID
+    number: str
+    from_warehouse_id: uuid.UUID
+    from_warehouse_name: str
+    to_warehouse_id: uuid.UUID
+    to_warehouse_name: str
+    note: str | None
+    created_at: datetime
+    lines: list[CostLineOut]

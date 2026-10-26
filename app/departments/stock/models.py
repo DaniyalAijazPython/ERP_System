@@ -127,3 +127,120 @@ class GoodsReceiptLine(Base):
     @property
     def line_total(self) -> Decimal:
         return (self.quantity * self.unit_price).quantize(Decimal("0.01"))
+
+
+class StockOut(Base):
+    """'Stock Out': stock that leaves a warehouse (to production, damaged, sample ...)."""
+
+    __tablename__ = "stock_outs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "number", name="uq_stock_outs_tenant_number"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_stock_outs_tenant_idem"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), index=True)
+    number: Mapped[str] = mapped_column(String(30))
+    warehouse_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("warehouses.id"))
+    reason: Mapped[str] = mapped_column(String(20))  # production, damaged, sample, other
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(10), default="posted")  # posted, undone
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    undone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    lines: Mapped[list["StockOutLine"]] = relationship(
+        back_populates="stock_out", cascade="all, delete-orphan", order_by="StockOutLine.position"
+    )
+    warehouse = relationship("Warehouse")
+
+    @property
+    def warehouse_name(self) -> str:
+        return self.warehouse.name
+
+    @property
+    def total_cost(self) -> Decimal:
+        return sum((l.line_cost for l in self.lines), Decimal("0")).quantize(Decimal("0.01"))
+
+
+class StockOutLine(Base):
+    __tablename__ = "stock_out_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    stock_out_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("stock_outs.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    item_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("items.id"))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"))  # cost when it left
+
+    stock_out: Mapped[StockOut] = relationship(back_populates="lines")
+    item = relationship("Item")
+
+    @property
+    def item_name(self) -> str:
+        return self.item.name
+
+    @property
+    def unit_code(self) -> str:
+        return self.item.unit.code
+
+    @property
+    def line_cost(self) -> Decimal:
+        return (self.quantity * self.unit_cost).quantize(Decimal("0.01"))
+
+
+class StockMove(Base):
+    """'Move stock': from one warehouse to another."""
+
+    __tablename__ = "stock_moves"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "number", name="uq_stock_moves_tenant_number"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_stock_moves_tenant_idem"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), index=True)
+    number: Mapped[str] = mapped_column(String(30))
+    from_warehouse_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("warehouses.id"))
+    to_warehouse_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("warehouses.id"))
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    lines: Mapped[list["StockMoveLine"]] = relationship(
+        back_populates="stock_move", cascade="all, delete-orphan", order_by="StockMoveLine.position"
+    )
+    from_warehouse = relationship("Warehouse", foreign_keys=[from_warehouse_id])
+    to_warehouse = relationship("Warehouse", foreign_keys=[to_warehouse_id])
+
+    @property
+    def from_warehouse_name(self) -> str:
+        return self.from_warehouse.name
+
+    @property
+    def to_warehouse_name(self) -> str:
+        return self.to_warehouse.name
+
+
+class StockMoveLine(Base):
+    __tablename__ = "stock_move_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    stock_move_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("stock_moves.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    item_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("items.id"))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3))
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), default=Decimal("0"))
+
+    stock_move: Mapped[StockMove] = relationship(back_populates="lines")
+    item = relationship("Item")
+
+    @property
+    def item_name(self) -> str:
+        return self.item.name
+
+    @property
+    def unit_code(self) -> str:
+        return self.item.unit.code

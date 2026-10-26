@@ -4,9 +4,9 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
-from app.modules.auth import models  # noqa: F401
-from app.modules.inventory import models  # noqa: F401
-from app.modules.stock import models  # noqa: F401
+from app.departments.auth import models  # noqa: F401
+from app.departments.inventory import models  # noqa: F401
+from app.departments.stock import models  # noqa: F401
 from app.shared.base import Base
 
 config = context.config

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.errors import Forbidden, Unauthorized
 from app.core.security import decode_token
-from app.modules.auth.models import User
+from app.departments.auth.models import User
 
 _bearer = HTTPBearer(auto_error=False)
 

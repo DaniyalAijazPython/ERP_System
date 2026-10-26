@@ -6,16 +6,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import Conflict, NotFound
-from app.modules.auth.models import User
-from app.modules.inventory.models import Item, Party, PartyKind, Warehouse
-from app.modules.stock.models import (
+from app.departments.auth.models import User
+from app.departments.inventory.models import Item, Party, PartyKind, Warehouse
+from app.departments.stock.models import (
     DocCounter,
     GoodsReceipt,
     GoodsReceiptLine,
     StockBalance,
+    StockMove,
+    StockMoveLine,
     StockMovement,
+    StockOut,
+    StockOutLine,
 )
-from app.modules.stock.schemas import StockFixIn, StockInIn
+from app.departments.stock.schemas import StockFixIn, StockInIn, StockMoveIn, StockOutIn
 from app.shared.base import utcnow
 
 CASH_SUPPLIER_NAME = "Local market (cash)"
@@ -88,6 +92,12 @@ def _balance(db: Session, tenant_id: uuid.UUID, item_id: uuid.UUID, warehouse_id
     return b
 
 
+# Kinds that bring stock in at a known cost (cost average is worked out again)
+COST_IN_KINDS = {"stock_in", "stock_out_undone", "move_in"}
+# Kinds that take stock out at the current average cost
+COST_OUT_KINDS = {"stock_out", "move_out"}
+
+
 def _move(
     db: Session,
     user: User,
@@ -98,8 +108,8 @@ def _move(
     unit_cost: Decimal | None = None,
     reference_number: str | None = None,
     note: str | None = None,
-) -> None:
-    """The ONE place where stock goes up or down."""
+) -> Decimal:
+    """The ONE place where stock goes up or down. Returns the cost per unit used."""
     b = _balance(db, user.tenant_id, item.id, warehouse_id)
     new_qty = b.quantity + change
     if new_qty < 0:
@@ -108,7 +118,9 @@ def _move(
             f"Not enough {item.name}: you have {fmt(b.quantity)} {item.unit.code}, you need {fmt(-change)} {item.unit.code}",
             field="quantity",
         )
-    if kind == "stock_in" and unit_cost is not None and change > 0:
+    if change < 0 and kind in COST_OUT_KINDS:
+        unit_cost = b.avg_cost  # stock leaves at what it cost us on average
+    if kind in COST_IN_KINDS and unit_cost is not None and change > 0:
         value = b.quantity * b.avg_cost + change * unit_cost
         b.avg_cost = (value / new_qty).quantize(Decimal("0.0001"))
     b.quantity = new_qty
@@ -117,6 +129,7 @@ def _move(
         unit_cost=unit_cost, kind=kind, reference_number=reference_number, note=note, created_by=user.id,
     ))
     db.flush()
+    return unit_cost if unit_cost is not None else Decimal("0")
 
 
 # ------------------------------------------------------------ Stock In
@@ -246,3 +259,110 @@ def fix_count(db: Session, user: User, data: StockFixIn) -> StockMovement:
     return db.scalar(select(StockMovement).where(
         StockMovement.tenant_id == user.tenant_id, StockMovement.item_id == item.id
     ).order_by(StockMovement.created_at.desc()).limit(1))
+
+
+# ------------------------------------------------------------ Stock Out
+def _active_items(db: Session, tenant_id: uuid.UUID, lines) -> dict[uuid.UUID, Item]:
+    items: dict[uuid.UUID, Item] = {}
+    for i, line in enumerate(lines):
+        item = items.get(line.item_id) or _item(db, tenant_id, line.item_id, field=f"lines.{i}.item_id")
+        if not item.is_active:
+            raise Conflict("ITEM_OFF", f"Item '{item.name}' is switched off", field=f"lines.{i}.item_id")
+        items[line.item_id] = item
+    return items
+
+
+def create_stock_out(db: Session, user: User, data: StockOutIn, idem_key: str | None) -> StockOut:
+    tenant_id = user.tenant_id
+    if idem_key:
+        old = db.scalar(select(StockOut).where(StockOut.tenant_id == tenant_id, StockOut.idempotency_key == idem_key))
+        if old is not None:
+            return old
+    note = (data.note or "").strip() or None
+    if data.reason.value == "other" and not note:
+        raise Conflict("NOTE_NEEDED", "Please write why the stock is going out", field="note")
+    warehouse = _warehouse(db, tenant_id, data.warehouse_id)
+    items = _active_items(db, tenant_id, data.lines)
+
+    out = StockOut(
+        tenant_id=tenant_id, number=_next_number(db, tenant_id, "SO"), warehouse_id=warehouse.id,
+        reason=data.reason.value, note=note, idempotency_key=idem_key, created_by=user.id,
+    )
+    db.add(out)
+    db.flush()
+    for pos, line in enumerate(data.lines):
+        cost = _move(db, user, items[line.item_id], warehouse.id, -line.quantity, "stock_out",
+                     reference_number=out.number, note=note)
+        out.lines.append(StockOutLine(position=pos, item_id=line.item_id, quantity=line.quantity, unit_cost=cost))
+    db.flush()
+    db.refresh(out)
+    return out
+
+
+def get_stock_out(db: Session, tenant_id: uuid.UUID, oid: uuid.UUID) -> StockOut:
+    o = db.scalar(select(StockOut).where(StockOut.id == oid, StockOut.tenant_id == tenant_id))
+    if o is None:
+        raise NotFound("STOCK_OUT_NOT_FOUND", "That Stock Out does not exist")
+    return o
+
+
+def list_stock_out(db: Session, tenant_id: uuid.UUID, limit: int, offset: int):
+    q = select(StockOut).where(StockOut.tenant_id == tenant_id)
+    return list(db.scalars(q.order_by(StockOut.created_at.desc()).limit(limit).offset(offset)))
+
+
+def undo_stock_out(db: Session, user: User, oid: uuid.UUID) -> StockOut:
+    """Puts the stock back at the same cost it left with. The history keeps both rows."""
+    o = get_stock_out(db, user.tenant_id, oid)
+    if o.status == "undone":
+        raise Conflict("ALREADY_UNDONE", f"{o.number} was already undone")
+    for line in o.lines:
+        _move(db, user, line.item, o.warehouse_id, line.quantity, "stock_out_undone",
+              unit_cost=line.unit_cost, reference_number=o.number, note=f"Undo of {o.number}")
+    o.status = "undone"
+    o.undone_at = utcnow()
+    db.flush()
+    return o
+
+
+# ------------------------------------------------------------ Move stock
+def create_stock_move(db: Session, user: User, data: StockMoveIn, idem_key: str | None) -> StockMove:
+    tenant_id = user.tenant_id
+    if idem_key:
+        old = db.scalar(select(StockMove).where(StockMove.tenant_id == tenant_id, StockMove.idempotency_key == idem_key))
+        if old is not None:
+            return old
+    if data.from_warehouse_id == data.to_warehouse_id:
+        raise Conflict("SAME_WAREHOUSE", "Choose two different warehouses", field="to_warehouse_id")
+    src = _warehouse(db, tenant_id, data.from_warehouse_id)
+    dst = _warehouse(db, tenant_id, data.to_warehouse_id)
+    items = _active_items(db, tenant_id, data.lines)
+
+    mv = StockMove(
+        tenant_id=tenant_id, number=_next_number(db, tenant_id, "MV"), from_warehouse_id=src.id,
+        to_warehouse_id=dst.id, note=(data.note or "").strip() or None, idempotency_key=idem_key, created_by=user.id,
+    )
+    db.add(mv)
+    db.flush()
+    for pos, line in enumerate(data.lines):
+        item = items[line.item_id]
+        cost = _move(db, user, item, src.id, -line.quantity, "move_out",
+                     reference_number=mv.number, note=f"To {dst.name}")
+        _move(db, user, item, dst.id, line.quantity, "move_in", unit_cost=cost,
+              reference_number=mv.number, note=f"From {src.name}")
+        mv.lines.append(StockMoveLine(position=pos, item_id=line.item_id, quantity=line.quantity, unit_cost=cost))
+    db.flush()
+    db.refresh(mv)
+    return mv
+
+
+def get_stock_move(db: Session, tenant_id: uuid.UUID, mid: uuid.UUID) -> StockMove:
+    m = db.scalar(select(StockMove).where(StockMove.id == mid, StockMove.tenant_id == tenant_id))
+    if m is None:
+        raise NotFound("STOCK_MOVE_NOT_FOUND", "That stock move does not exist")
+    return m
+
+
+def list_stock_moves(db: Session, tenant_id: uuid.UUID, limit: int, offset: int):
+    q = select(StockMove).where(StockMove.tenant_id == tenant_id)
+    return list(db.scalars(q.order_by(StockMove.created_at.desc()).limit(limit).offset(offset)))

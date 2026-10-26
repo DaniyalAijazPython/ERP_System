@@ -4,8 +4,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import Conflict, NotFound
-from app.modules.inventory.models import Item, Party, PartyKind, Unit, Warehouse
-from app.modules.inventory.schemas import (
+from app.departments.inventory.models import Item, Party, PartyKind, Unit, Warehouse
+from app.departments.inventory.schemas import (
     ItemIn,
     ItemUpdate,
     PartyIn,

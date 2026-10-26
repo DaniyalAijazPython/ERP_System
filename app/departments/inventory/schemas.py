@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.inventory.models import ItemType
+from app.departments.inventory.models import ItemType
 
 
 class _Out(BaseModel):

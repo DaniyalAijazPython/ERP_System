@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import get_current_user, require_roles
-from app.modules.inventory import services
-from app.modules.inventory.models import ItemType, PartyKind
-from app.modules.inventory.schemas import (
+from app.departments.inventory import services
+from app.departments.inventory.models import ItemType, PartyKind
+from app.departments.inventory.schemas import (
     ItemIn,
     ItemOut,
     ItemPage,
@@ -21,7 +21,7 @@ from app.modules.inventory.schemas import (
     WarehouseOut,
     WarehouseUpdate,
 )
-from app.modules.auth.models import User
+from app.departments.auth.models import User
 
 router = APIRouter(tags=["inventory"])
 
