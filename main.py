@@ -3,6 +3,7 @@ from fastapi import APIRouter, FastAPI
 from app.core.errors import register_error_handlers
 from app.departments.auth.routes import router as auth_router
 from app.departments.inventory.routes import router as inventory_router
+from app.departments.production.routes import router as production_router
 from app.departments.stock.routes import router as stock_router
 
 
@@ -14,6 +15,7 @@ def create_app() -> FastAPI:
     api.include_router(auth_router)
     api.include_router(inventory_router)
     api.include_router(stock_router)
+    api.include_router(production_router)
     app.include_router(api)
 
     @app.get("/health", tags=["system"])

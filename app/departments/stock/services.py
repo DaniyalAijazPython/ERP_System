@@ -93,9 +93,9 @@ def _balance(db: Session, tenant_id: uuid.UUID, item_id: uuid.UUID, warehouse_id
 
 
 # Kinds that bring stock in at a known cost (cost average is worked out again)
-COST_IN_KINDS = {"stock_in", "stock_out_undone", "move_in"}
+COST_IN_KINDS = {"stock_in", "stock_out_undone", "move_in", "make_done", "make_use_undone"}
 # Kinds that take stock out at the current average cost
-COST_OUT_KINDS = {"stock_out", "move_out"}
+COST_OUT_KINDS = {"stock_out", "move_out", "make_use", "make_done_undone"}
 
 
 def _move(
